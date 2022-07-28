@@ -112,7 +112,6 @@ Function Invoke-StatVariableLoad
                     Write-Debug "Importing StatCredential"
                     $EncString = ($VariableStore | where {$_.name -eq "securepass"}).Value | ConvertTo-SecureString
                     $Credential = New-Object System.Management.Automation.PsCredential($Variable.Value, $EncString)
-                    $Credential
                     set-variable -scope 1 -name StatCredential -value $Credential
                 }
             }
@@ -139,6 +138,101 @@ Function Read-StatArray
     {
         $Array[$i]
     }
+}
+
+Function Merge-ObjectData
+{
+    param
+    (
+        $BaseObject,
+        $MergeObject
+    )
+
+    if ($BaseObject -eq $null)
+    {
+        return $MergeObject
+    }
+    else
+    {
+        $MergeProperties = $MergeObject | gm | where {$_.MemberType -eq "NoteProperty"} | `
+                                               where { `
+                                                   ($BaseObject | gm | where {$_.MemberType -eq "NoteProperty"}).name `
+                                                   -notcontains `
+                                                   $_.name `
+                                               } `
+
+        Foreach ($MergeProperty in $MergeProperties)
+        {
+            $BaseObject | add-member -type NoteProperty -name $MergeProperty.Name -value $MergeProperty."$($MergeProperty.Name)" -force
+        }
+    }
+
+    return $BaseObject
+}
+
+Function Merge-StatReturn
+{
+    param
+    (
+        $BaseReply,
+        $MergeReply
+    )
+    if ($BaseReply)
+    {
+        if ($MergeReply.data.Objects)
+        {
+            $TempList = $null
+            $TempList = New-Object System.Collections.ArrayList
+            
+            Write-Verbose "Merging First array of size $($BaseReply.data.Objects.data.count)"
+            foreach ($DataObject in $BaseReply.data.Objects.data)
+            {
+
+                $ignore = $TempList.add((Merge-ObjectData ($TempList | where {$_.id -eq $DataObject.id}) $DataObject))
+            }
+
+            Write-Verbose "Merging Second array of size $($MergeReply.data.Objects.data.count)"
+            
+            foreach ($DataObject in $MergeReply.data.Objects.data)
+            {
+                $ignore = $TempList.add((Merge-ObjectData ($TempList | where {$_.id -eq $DataObject.id}) $DataObject))
+            }
+
+            $BaseReply.data.Objects | add-member -type NoteProperty -name data -value $TempList.ToArray() -force
+        }
+
+        try 
+        {
+            Write-Verbose "Merging Link values"
+            if ($BaseReply.links)
+            {
+                $TempList = $null
+                $TempList = New-Object System.Collections.ArrayList
+
+                Write-Debug "Links in base object - $($BaseReply.links.count)"
+                Write-Debug "Links in merge object - $($MergeReply.links.count)"
+                $TempList.AddRange($BaseReply.links)
+                $TempList.AddRange($MergeReply.links)
+
+                $TempListArray = $TempList.ToArray()
+
+                $BaseReply | add-member -type NoteProperty -name links -Value $TempListArray -force
+
+                Write-Debug "Links in base object post add- $($BaseReply.links.count)"
+            }
+        }
+        catch
+        {
+            Write-Debug "$($BaseReply.links.count)"
+            Write-Debug "$($MergeReply.links.count)"
+        }
+
+    }
+    else
+    {
+        $BaseReply = $MergeReply
+    }
+    return $BaseReply
 }
 
 Function Invoke-StatRequest
@@ -172,30 +266,17 @@ Function Invoke-StatRequest
         $offset = 0
         do 
         {
+            Write-Debug "Getting $uri"
             $PageReturn = Invoke-RestMethod -URI $uri                 `
                                             -Method $Method           `
                                             -ContentType $ContentType `
                                             -Credential $Credential 
-            if ($FullReturn)
-            {
-                if ($PageReturn.data.Objects)
-                {
-                    $TempList = New-Object System.Collections.ArrayList
 
-                    $TempList.addrange((Read-StatArray $FullReturn.data.Objects.data))
-                    $TempList.addrange((Read-StatArray $PageReturn.data.Objects.data))
 
-                    $FullReturn.data.Objects | add-member -type NoteProperty -name data -value $TempList.ToArray() -force
-                }
-                $FullReturn.links += $PageReturn.Links
-            }
-            else
-            {
-                $FullReturn = $PageReturn
-            }
-            $MoreData = ($PageReturn.Links | where {$_.rel -eq "Last"}) -ne $null
-
+            $MoreData = (($PageReturn.Links | where {$_.rel -eq "Last"}) -ne $null)
             $offset += 50
+
+            $FullReturn = Merge-StatReturn $FullReturn $PageReturn
 
             if ($uri -match "offset=")
             {
@@ -236,7 +317,7 @@ Function Invoke-StatAuthentication
         password=$Creds.GetNetworkCredential().Password
     }
     $URI = "$($StatProtocol)://$($StatServer)/ss-auth?user=$($Body["user"])&password=$($Body["password"])"
-    Write-Host $URI
+    Write-Verbose $URI
     $Return = Invoke-RestMethod -Method Post -Uri $URI -ContentType "application/x-www-form-urlencoded"
     return $Return
 }
@@ -259,6 +340,70 @@ Function Invoke-StatDiscoverySingle
     Invoke-StatRequest -uri "$StatAPIPath/discover/execute/?mode=single"
 }
 
+Function Get-StatResource
+{
+    param
+    (
+        [switch]
+        $all,
+        $Resource,
+        $filterstring,
+        $properties,
+        [switch]
+        $allProperties,
+        [switch]
+        $RawData
+    )
+
+    if ($all)
+    {
+        $ResourceData = (Invoke-StatRequest -uri "$StatAPIPath/$Resource")
+
+        if (-not $RawData)
+        {
+            $ResourceData = $ResourceData.data.Objects.data
+        }
+    }
+    else {
+        $ResourceData = (Invoke-StatRequest -uri "$StatAPIPath/$Resource/?$filterstring")
+
+        if (-not $RawData)
+        {
+            $ResourceData = $ResourceData.data.Objects.data
+        }
+    }
+
+    if ((-not $properties) -and (-not $allProperties))
+    {
+        Write-Verbose "No extended properties were requested or raw data was requested, returning plain data"
+        return $ResourceData
+    }
+    else {
+        Write-Verbose "Extended properties were requested"
+        $Objects = @()
+
+        if ($allProperties)
+        {
+            Write-Verbose "All properties were requested"
+
+            $properties = Get-StatDevicePropertyLinks $ResourceData[0].id
+        }
+
+        foreach ($Object in $ResourceData)
+        {
+            foreach ($Property in $properties)
+            {
+                $ObjectInfo = Merge-StatReturn $ObjectInfo (Invoke-StatRequest -uri "$StatAPIPath/cdt_device/$($Device.id)/$Property")
+            }
+
+            $Objects += $ObjectInfo
+        }
+
+        return $Objects
+    }
+
+}
+
 Function Get-StatDevice
 {
     param
@@ -266,27 +411,37 @@ Function Get-StatDevice
         [switch]
         $all,
         $filterstring,
-        $properties
+        $properties,
+        [switch]
+        $allProperties,
+        [switch]
+        $RawData
     )
 
-    if ($all)
-    {
-        $DeviceData = Invoke-StatRequest -uri "$StatAPIPath/cdt_device"
+    Return Get-StatResource -all:$all "cdt_device" -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
+}
 
-    }
-    else {
-        $DeviceData = Invoke-StatRequest -uri "$StatAPIPath/cdt_device/?$filterstring"
-    }
+Function Get-StatPropertyLinks
+{
+    param
+    (
+        $Resource,
+        $Object
+    )
 
-    if (-not $properties)
-    {
-        $DeviceData
-    }
+    return (Invoke-StatRequest -uri "$StatAPIPath/$Resource/$Object").links | where {$_.rel -eq "item"} | `
+                                                                              %{$_.link -replace "$StatAPIRoot/$Resource/$Object/"} | `
+                                                                              where {$_ -ne "id"}
+}
 
-    foreach ($Device in $DeviceData.data.Objects.data)
-    {
-        #Invoke-StatRequest -uri "$StatAPIPath/cdt_device/$($Device.id)"
-    }
+Function Get-StatDevicePropertyLinks
+{
+    param
+    (
+        $Device
+    )
+
+    return (Get-StatPropertyLinks "cdt_device" $Device.id)
 }
 
 ##Load any saved variables
