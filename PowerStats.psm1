@@ -163,7 +163,7 @@ Function Merge-ObjectData
 
         Foreach ($MergeProperty in $MergeProperties)
         {
-            $BaseObject | add-member -type NoteProperty -name $MergeProperty.Name -value $MergeProperty."$($MergeProperty.Name)" -force
+            $BaseObject | add-member -type NoteProperty -name $MergeProperty.Name -value $MergeObject."$($MergeProperty.Name)" -force
         }
     }
 
@@ -203,9 +203,9 @@ Function Merge-StatReturn
 
         try 
         {
-            Write-Verbose "Merging Link values"
             if ($BaseReply.links)
             {
+                Write-Verbose "Merging Link values"
                 $TempList = $null
                 $TempList = New-Object System.Collections.ArrayList
 
@@ -233,6 +233,27 @@ Function Merge-StatReturn
         $BaseReply = $MergeReply
     }
     return $BaseReply
+}
+
+Function Merge-ArrayToCSString
+{
+    param
+    (
+        $Array,
+        $Prefix,
+        $Suffix
+    )
+
+    $tofs = $ofs
+    $ofs = ","
+
+    $TempString = "$Array"
+
+    $ofs = $tofs
+
+    $TempString = $Prefix + $TempString + $Suffix
+
+    $TempString
 }
 
 Function Invoke-StatRequest
@@ -344,81 +365,73 @@ Function Get-StatResource
 {
     param
     (
+        [string]
+        $Resource,
+        [string]
+        $object,
+        [string]
+        $filterstring,
+        [object[]]
+        $properties,
         [switch]
         $all,
-        $Resource,
-        $filterstring,
-        $properties,
         [switch]
         $allProperties,
         [switch]
         $RawData
     )
 
-    if ($all)
+    if ($allProperties)
     {
-        $ResourceData = (Invoke-StatRequest -uri "$StatAPIPath/$Resource")
+        Write-Verbose "All properties were requested"
 
-        if (-not $RawData)
-        {
-            $ResourceData = $ResourceData.data.Objects.data
-        }
+        $properties = Get-StatDevicePropertyLinks "dummy"
     }
-    else {
-        $ResourceData = (Invoke-StatRequest -uri "$StatAPIPath/$Resource/?$filterstring")
-
-        if (-not $RawData)
-        {
-            $ResourceData = $ResourceData.data.Objects.data
-        }
-    }
-
-    if ((-not $properties) -and (-not $allProperties))
+    
+    if ($properties)
     {
-        Write-Verbose "No extended properties were requested or raw data was requested, returning plain data"
-        return $ResourceData
-    }
-    else {
-        Write-Verbose "Extended properties were requested"
-        $Objects = @()
+        $PropertyFilters = Merge-ArrayToCSString -array $properties -prefix "fields="
 
-        if ($allProperties)
-        {
-            Write-Verbose "All properties were requested"
-
-            $properties = Get-StatDevicePropertyLinks $ResourceData[0].id
-        }
-
-        foreach ($Object in $ResourceData)
-        {
-            foreach ($Property in $properties)
-            {
-                $ObjectInfo = Merge-StatReturn $ObjectInfo (Invoke-StatRequest -uri "$StatAPIPath/cdt_device/$($Device.id)/$Property")
-            }
-
-            $Objects += $ObjectInfo
-        }
-
-        return $Objects
+        $filterstring += $PropertyFilters
     }
 
+    if ($filterstring[0] -ne "?")
+    {
+        $filterstring = "?" + $filterstring
+
+        if ($filterstring[0] -eq "&")
+        {
+            $filterstring = $filterstring.Substring(1,$filterstring.length - 1)
+        }
+    }
+
+    $ResourceData = (Invoke-StatRequest -uri "$StatAPIPath/$Resource/$($object)$filterstring")
+
+    if (-not $RawData)
+    {
+        $ResourceData = $ResourceData.data.Objects.data
+    }
+
+
+    return $ResourceData
 }
 
 Function Get-StatDevice
 {
     param
     (
-        [switch]
-        $all,
+        $DeviceID,
         $filterstring,
         $properties,
+        [switch]
+        $all,
         [switch]
         $allProperties,
         [switch]
         $RawData
     )
 
-    Return Get-StatResource -all:$all "cdt_device" -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
+    Return Get-StatResource -all:$all -resource "cdt_device" -object $DeviceID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
 }
 
 Function Get-StatPropertyLinks
@@ -441,7 +454,7 @@ Function Get-StatDevicePropertyLinks
         $Device
     )
 
-    return (Get-StatPropertyLinks "cdt_device" $Device.id)
+    return (Get-StatPropertyLinks "cdt_device" $Device)
 }
 
 ##Load any saved variables
