@@ -257,7 +257,6 @@ Function Invoke-StatRequest
         $uri,
         $Method = "Get",
         $ContentType = "application/x-www-form-urlencoded",
-        $AuthType = "basic",
         $Credential,
         $APIToken
     )
@@ -276,45 +275,54 @@ Function Invoke-StatRequest
         }
     }
 
-    if ($AuthType = "Basic")
+    if ($StatAuthType -eq "Token")
     {
-        $offset = 0
-        do 
-        {
-            Write-Debug "Getting $uri"
-            $PageReturn = Invoke-RestMethod -URI $uri                 `
-                                            -Method $Method           `
-                                            -ContentType $ContentType `
-                                            -Credential $Credential 
-
-
-            $MoreData = (($PageReturn.Links | where {$_.rel -eq "Last"}) -ne $null)
-            $offset += 50
-
-            $FullReturn = Merge-StatReturn $FullReturn $PageReturn
-
-            if ($uri -match "offset=")
-            {
-                $uri = $uri -replace "offset=\d*","offset=$offset"
-            }
-            elseif ($uri -match "\?")
-            {
-                $uri = "$($uri)&offset=$offset"
-            }
-            else {
-                $uri = "$($uri)?&offset=$offset"
-            }
-        }
-        while ($MoreData)
-    }
-    else
-    {
-        ## Sorry, this part hasn't been implemented yet, I only have a basic auth testing version
-        if ($APIToken = $null)
+        ##Yet to be implemented/completed
+        if ($StatAPIToken = $null)
         {
             Invoke-StatAuthentication $Credential
         }
     }
+    else {
+
+    }
+
+
+    $offset = 0
+    do 
+    {
+        Write-Debug "Getting $uri"
+
+        if ($StatAuthType -eq "Token")
+        {
+
+        }
+        else {
+            $PageReturn = Invoke-RestMethod -URI $uri                 `
+                                            -Method $Method           `
+                                            -ContentType $ContentType `
+                                            -Credential $Credential
+        } 
+
+
+        $MoreData = (($PageReturn.Links | where {$_.rel -eq "Last"}) -ne $null)
+        $offset += 50
+
+        $FullReturn = Merge-StatReturn $FullReturn $PageReturn
+
+        if ($uri -match "offset=")
+        {
+            $uri = $uri -replace "offset=\d*","offset=$offset"
+        }
+        elseif ($uri -match "\?")
+        {
+            $uri = "$($uri)&offset=$offset"
+        }
+        else {
+            $uri = "$($uri)?&offset=$offset"
+        }
+    }
+    while ($MoreData)
 
     return $FullReturn
 }
