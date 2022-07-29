@@ -9,6 +9,8 @@ $StatAPIPath = "$($StatProtocol)://$($StatServer)$($StatAPIRoot)"
 $StatCredential = $null
 $StatAPIToken = ""
 $StatAuthType = "Basic"
+$StatSkipProperties = @("id")
+
 $ModuleFolder = (Get-Module PowerStats -ListAvailable).path -replace "PowerStats\.psm1"
 
 Function Set-StatAPIRoot
@@ -185,18 +187,10 @@ Function Merge-StatReturn
             $TempList = New-Object System.Collections.ArrayList
             
             Write-Verbose "Merging First array of size $($BaseReply.data.Objects.data.count)"
-            foreach ($DataObject in $BaseReply.data.Objects.data)
-            {
-
-                $ignore = $TempList.add((Merge-ObjectData ($TempList | where {$_.id -eq $DataObject.id}) $DataObject))
-            }
+            $TempList.AddRange($BaseReply.data.Objects.data)
 
             Write-Verbose "Merging Second array of size $($MergeReply.data.Objects.data.count)"
-            
-            foreach ($DataObject in $MergeReply.data.Objects.data)
-            {
-                $ignore = $TempList.add((Merge-ObjectData ($TempList | where {$_.id -eq $DataObject.id}) $DataObject))
-            }
+            $TempList.AddRange($MergeReply.data.Objects.data)
 
             $BaseReply.data.Objects | add-member -type NoteProperty -name data -value $TempList.ToArray() -force
         }
@@ -385,7 +379,7 @@ Function Get-StatResource
     {
         Write-Verbose "All properties were requested"
 
-        $properties = Get-StatDevicePropertyLinks "dummy"
+        $properties = Get-StatPropertyLinks $Resource "dummy"
     }
     
     if ($properties)
@@ -444,18 +438,100 @@ Function Get-StatPropertyLinks
 
     return (Invoke-StatRequest -uri "$StatAPIPath/$Resource/$Object").links | where {$_.rel -eq "item"} | `
                                                                               %{$_.link -replace "$StatAPIRoot/$Resource/$Object/"} | `
-                                                                              where {$_ -ne "id"}
+                                                                              where {$_ -notin $StatSkipProperties} 
 }
 
 Function Get-StatDevicePropertyLinks
 {
     param
     (
-        $Device
+        $DeviceID,
+        $filterstring,
+        $properties,
+        [switch]
+        $all,
+        [switch]
+        $allProperties,
+        [switch]
+        $RawData
     )
 
-    return (Get-StatPropertyLinks "cdt_device" $Device)
+    return (Get-StatPropertyLinks "cdt_device" $DeviceID)
 }
+
+Function Get-StatDeviceInventory
+{
+    param
+    (
+        $DeviceID,
+        $filterstring,
+        $properties,
+        [switch]
+        $all,
+        [switch]
+        $allProperties,
+        [switch]
+        $RawData
+    )
+
+    Return Get-StatResource -all:$all -resource "cdt_inventory_device" -object $DeviceID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
+}
+
+Function Get-StatInventory
+{
+    param
+    (
+        $InventoryID,
+        $filterstring,
+        $properties,
+        [switch]
+        $all,
+        [switch]
+        $allProperties,
+        [switch]
+        $RawData
+    )
+
+    Return Get-StatResource -all:$all -resource "cdt_inventory" -object $InventoryID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
+}
+
+Function Get-StatIpAddress
+{
+    param
+    (
+        $IPID,
+        $filterstring,
+        $properties,
+        [switch]
+        $all,
+        [switch]
+        $allProperties,
+        [switch]
+        $RawData
+    )
+
+    Return Get-StatResource -all:$all -resource "cdt_ipaddress" -object $IPID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
+}
+
+Function Get-StatIpAddr
+{
+    param
+    (
+        $IPID,
+        $filterstring,
+        $properties,
+        [switch]
+        $all,
+        [switch]
+        $allProperties,
+        [switch]
+        $RawData
+    )
+
+    Return Get-StatResource -all:$all -resource "cdt_ipaddr" -object $IPID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
+}
+
+
 
 ##Load any saved variables
 Invoke-StatVariableLoad
