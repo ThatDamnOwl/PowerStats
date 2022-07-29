@@ -287,7 +287,6 @@ Function Invoke-StatRequest
 
     }
 
-
     $offset = 0
     do 
     {
@@ -360,7 +359,17 @@ Function Invoke-StatDiscoverySingle
     (
         $Address
     )
-    Invoke-StatRequest -uri "$StatAPIPath/discover/execute/?mode=single"
+
+    if ($VerbosePreference -eq "Continue")
+    {
+        $Verbosity = 2
+    }
+    else
+    {
+        $Verbosity = 0    
+    }
+
+    Invoke-StatRequest -uri "$StatAPIPath/discover/execute/?mode=single&ip=$Address&verbose=$Verbosity"
 }
 
 Function Get-StatResource
