@@ -8,7 +8,7 @@ $StatProtocol = "http"
 $StatAPIPath = "$($StatProtocol)://$($StatServer)$($StatAPIRoot)"
 $StatCredential = $null
 $StatAPIToken = ""
-$StatAuthType = "Basic"
+$StatAuthType = "token"
 $StatSkipProperties = @("id")
 
 $ModuleFolder = (Get-Module PowerStats -ListAvailable).path -replace "PowerStats\.psm1"
@@ -52,6 +52,15 @@ Function Set-StatCredential
     set-variable -Scope 1 -Name StatCredential -Value $NewCredentials
 }
 
+Function Set-StatAuthType
+{
+    param (
+        $NewAuthType
+    )
+
+    set-variable -scope 1 -name StatAuthType -Value $NewAuthType
+}
+
 Function Get-StatServer
 {
     $StatServer
@@ -75,6 +84,16 @@ Function Get-StatAPIPath
 function Get-StatCredential
 {
     $StatCredential
+}
+
+function Get-StatAuthType
+{
+    $StatAuthType
+}
+
+Function Get-StatApiToken
+{
+    $StatAPIToken
 }
 
 Function Invoke-StatVariableSave 
@@ -256,9 +275,8 @@ Function Invoke-StatRequest
     (
         $uri,
         $Method = "Get",
-        $ContentType = "application/x-www-form-urlencoded",
-        $Credential,
-        $APIToken
+        $ContentType = "application/json",
+        $Credential
     )
 
     if ($Credential -eq $null)
@@ -278,9 +296,9 @@ Function Invoke-StatRequest
     if ($StatAuthType -eq "Token")
     {
         ##Yet to be implemented/completed
-        if ($StatAPIToken = $null)
+        if ($StatAPIToken -eq $null)
         {
-            Invoke-StatAuthentication $Credential
+            $Auth = Invoke-StatAuthentication $Credential
         }
     }
     else {
@@ -293,8 +311,15 @@ Function Invoke-StatRequest
         Write-Debug "Getting $uri"
 
         if ($StatAuthType -eq "Token")
-        {
-
+        {   
+            Write-Verbose $StatAPIToken
+            $Headers = @{"Authorization" = "Bearer $StatAPIToken"}
+            $Headers.keys | Write-Debug
+            $Headers.Values | Write-Debug 
+            $PageReturn = Invoke-RestMethod -URI $uri                 `
+                                            -Method $Method           `
+                                            -ContentType $ContentType `
+                                            -Headers $Headers
         }
         else {
             $PageReturn = Invoke-RestMethod -URI $uri                 `
@@ -330,18 +355,86 @@ Function Invoke-StatAuthentication
 {
     param
     (
-        $Creds
+        $Creds,
+        [switch]
+        $Token,
+        [switch]
+        $Basic
     )
 
-    ## TODO
-    $Body = @{
-        user=$Creds.Username
-        password=$Creds.GetNetworkCredential().Password
+    if ($Creds -eq $null)
+    {
+        $Creds = $StatCredential
     }
-    $URI = "$($StatProtocol)://$($StatServer)/ss-auth?user=$($Body["user"])&password=$($Body["password"])"
-    Write-Verbose $URI
-    $Return = Invoke-RestMethod -Method Post -Uri $URI -ContentType "application/x-www-form-urlencoded"
-    return $Return
+    else {
+        
+    }
+
+    if ($StatAuthType -eq "Token" -or $Token)
+    {
+        ## TODO
+        $Body = @{
+            user=$Creds.Username
+            password=$Creds.GetNetworkCredential().Password
+        }
+        $URI = "$($StatProtocol)://$($StatServer)/ss-auth"
+
+        try {
+                
+            $Return = Invoke-RestMethod -Method Post -Uri $URI -ContentType "application/x-www-form-urlencoded" `
+                                        -body $Body
+
+            $access_token = $Return.access_token.ToString()
+        }
+        catch
+        {
+            Write-Verbose "Authentication failed, please try again"
+
+            if (Invoke-StatAuthentication $Creds -Basic)
+            {
+                Write-Verbose "HINT - Try basic authentication"
+            }
+
+            return $False
+        }  
+
+
+        set-variable -scope 1 -name StatAPIToken -value ($access_token) -force
+
+        Write-Verbose $StatAPIToken
+
+        Write-Verbose "Authentication successful"  
+
+        set-variable -scope 1 -name StatCredential -value $Creds -force
+
+        return $true          
+    }
+    elseif ($StatAuthType -eq "Basic" -or $Basic) {
+        try {
+            $Ignore = Invoke-StatRequest -uri $StatAPIPath -contenttype "application/json" -credential $Creds
+
+
+        }
+        catch
+        {
+            Write-Verbose "Authentication failed, please try again"
+
+            if (Invoke-StatAuthentication $Creds -Token)
+            {
+                Write-Verbose "HINT - Try token authentication"
+            }
+            return $False
+        }
+
+        Write-Verbose "Authentication successful"  
+
+        set-variable -scope 1 -name StatCredential -value $Creds -force
+
+        return $True
+    }
+    else {
+        Write-Error "Incorrect authentication method provided please select either ""Basic"" or ""Token"""
+    }
 }
 
 
@@ -552,3 +645,12 @@ Function Get-StatIpAddr
 
 ##Load any saved variables
 Invoke-StatVariableLoad
+
+if ($StatCredential -ne $null)
+{
+    Invoke-StatAuthentication
+}
+else
+{
+    Write-Debug "No credentials stored"
+}
