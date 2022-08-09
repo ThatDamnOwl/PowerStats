@@ -829,7 +829,7 @@ Function New-StatMapObject
         $title = "Default",
         $type = "imagemap-panel",
         $valueMappings = @(),
-        $verson = 2,
+        $version = 2,
         $zoom = $null
     )
 
