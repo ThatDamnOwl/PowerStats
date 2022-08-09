@@ -724,7 +724,105 @@ Function New-StatLatLng
     }
 }
 
-Function New-StatMapObject 
+Function New-StatBGImage
+{
+
+}
+
+Function New-StatMapBounds
+{
+
+}
+
+Function New-Stat2DGridRef
+{
+
+}
+
+Function New-StatMapLegend
+{
+    
+}
+
+Function New-StatMapObject
+{
+    param
+    (
+        $bgColor = "#FFFFFF",
+        $bgimage = (New-StatBGImage),
+        $bounds  = (New-StatMapBounds),
+        $boxZoom = $true,
+        $center = $null,
+        $colorMappingMap = @(),
+        $colorMappings = @(),
+        $fontSize = 11,
+        $gridPos = (New-Stat2DGridRef),
+        $id = 1,
+        $imgType = "color",
+        $isLocked = $false,
+        $legends = (New-StatMapLegend),
+        $lineWeight = 3,
+        $linkFontSize = 11,
+        $links = @(),
+        $mapFit = $Disabled,
+        $maxZoom = 10,
+        $minZoon = -10,
+        $mouseWheelZoom = $false,
+        $nodeSize = 50,
+        $realbgimage = $null,
+        $saveCurView = $false,
+        $sensors = @{},
+        $series = @(),
+        $showEditControl = $true,
+        $showLegend = $false,
+        $showZoomControl = $true,
+        $targets = @(),
+        $title = "Default",
+        $type = "imagemap-panel",
+        $valueMappings = @(),
+        $verson = 2,
+        $zoom = $null,
+    )
+
+    return [pscustomobject]@{
+        "bgColor" = $bgColor 
+        "bgimage" = $bgimage 
+        "bounds" = $bounds  
+        "boxZoom" = $boxZoom 
+        "center" = $center 
+        "colorMappingMap" = $colorMappingMap 
+        "colorMappings" = $colorMappings 
+        "fontSize" = $fontSize 
+        "gridPos" = $gridPos 
+        "id" = $id 
+        "imgType" = $imgType 
+        "isLocked" = $isLocked 
+        "legends" = $legends 
+        "lineWeight" = $lineWeight 
+        "linkFontSize" = $linkFontSize 
+        "links" = $links 
+        "mapFit" = $mapFit 
+        "maxZoom" = $maxZoom 
+        "minZoom" = $minZoom 
+        "mouseWheelZoom" = $mouseWheelZoom 
+        "nodeSize" = $nodeSize 
+        "realbgimage" = $realbgimage 
+        "saveCurView" = $saveCurView 
+        "sensors" = $sensors 
+        "series" = $series 
+        "showEditControl" = $showEditControl 
+        "showLegend" = $showLegend 
+        "showZoomControl" = $showZoomControl 
+        "targets" = $targets 
+        "title" = $title
+        "type" = $type 
+        "valueMappings" = $valueMappings 
+        "version" = $version 
+        "zoom" = $zoom 
+    }
+}
+
+Function New-StatMapSensorObject 
 {
     param
     (
@@ -743,10 +841,7 @@ Function New-StatMapObject
         $labelPos = "bottom",
         $labelbgColor = "rgba(64,64,64,1.000)",
         $layerid = $null,
-        $location = [pscustomobject]@{
-            "lat" = 0
-            "lng" = 0
-        },
+        $location = (New-StatLatLng),
         $markerType = "text",
         $metric = "ifOperStatus - Stage",
         $metricType = "string",
