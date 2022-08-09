@@ -726,22 +726,71 @@ Function New-StatLatLng
 
 Function New-StatBGImage
 {
+    param
+    (
+        $edit = $false,
+        $shared = $false,
+        $value = $null
+    )
 
+    return [pscustomobject]@{
+        "edit" = $edit
+        "shared" = $shared
+        "value" = $value
+    }
 }
 
 Function New-StatMapBounds
 {
+    param 
+    (
+        $x1 = 0,
+        $x2 = 0,
+        $y1 = 0,
+        $y2 = 2000
+    )
 
+    return @(@($x1, $y1), @($x2, $y2))
 }
 
 Function New-Stat2DGridRef
 {
+    param
+    (
+        $h = 16,
+        $w = 24,
+        $x = 0,
+        $y = 0
+    )
 
+    return [pscustomobject]@{
+        "h" = $h
+        "w" = $w
+        "x" = $x
+        "y" = $y
+    }
 }
 
 Function New-StatMapLegend
 {
-    
+    param
+    (
+        $bgColor = "#FFFFFF",
+        $fontSize = 11,
+        $link = @(),
+        $node = @(),
+        $pos = $null,
+        $textColor = "#000000"
+    )
+
+    return [pscustomobject]@{
+        "bgColor" = $bgColor
+        "fontSize" = $fontSize
+        "link" = $link
+        "node" = $node
+        "pos" = $pos
+        "textColor" = $textColor
+    }
 }
 
 Function New-StatMapObject
@@ -781,7 +830,7 @@ Function New-StatMapObject
         $type = "imagemap-panel",
         $valueMappings = @(),
         $verson = 2,
-        $zoom = $null,
+        $zoom = $null
     )
 
     return [pscustomobject]@{
