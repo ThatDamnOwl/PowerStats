@@ -308,42 +308,51 @@ Function Invoke-StatRequest
     $offset = 0
     do 
     {
-        Write-Debug "Getting $uri"
+        try {
+            Write-Debug "Getting $uri"
 
-        if ($StatAuthType -eq "Token")
-        {   
-            Write-Verbose $StatAPIToken
-            $Headers = @{"Authorization" = "Bearer $StatAPIToken"}
-            $Headers.keys | Write-Debug
-            $Headers.Values | Write-Debug 
-            $PageReturn = Invoke-RestMethod -URI $uri                 `
-                                            -Method $Method           `
-                                            -ContentType $ContentType `
-                                            -Headers $Headers
+            if ($StatAuthType -eq "Token")
+            {   
+                Write-Verbose $StatAPIToken
+                $Headers = @{"Authorization" = "Bearer $StatAPIToken"}
+                $Headers.keys | Write-Debug
+                $Headers.Values | Write-Debug 
+                $PageReturn = Invoke-RestMethod -URI $uri                 `
+                                                -Method $Method           `
+                                                -ContentType $ContentType `
+                                                -Headers $Headers
+            }
+            else {
+                $PageReturn = Invoke-RestMethod -URI $uri                 `
+                                                -Method $Method           `
+                                                -ContentType $ContentType `
+                                                -Credential $Credential
+            } 
+
+
+            $MoreData = (($PageReturn.Links | where {$_.rel -eq "Last"}) -ne $null)
+            $offset += 50
+
+            $FullReturn = Merge-StatReturn $FullReturn $PageReturn
+
+            if ($uri -match "offset=")
+            {
+                $uri = $uri -replace "offset=\d*","offset=$offset"
+            }
+            elseif ($uri -match "\?")
+            {
+                $uri = "$($uri)&offset=$offset"
+            }
+            else {
+                $uri = "$($uri)?&offset=$offset"
+            }
         }
-        else {
-            $PageReturn = Invoke-RestMethod -URI $uri                 `
-                                            -Method $Method           `
-                                            -ContentType $ContentType `
-                                            -Credential $Credential
-        } 
-
-
-        $MoreData = (($PageReturn.Links | where {$_.rel -eq "Last"}) -ne $null)
-        $offset += 50
-
-        $FullReturn = Merge-StatReturn $FullReturn $PageReturn
-
-        if ($uri -match "offset=")
-        {
-            $uri = $uri -replace "offset=\d*","offset=$offset"
-        }
-        elseif ($uri -match "\?")
-        {
-            $uri = "$($uri)&offset=$offset"
-        }
-        else {
-            $uri = "$($uri)?&offset=$offset"
+        catch{
+            if ($Error[0].Exception -match "\(401\) Unauthorized")
+            {
+                Write-Verbose "Session may have expired, trying to reauthenticate"
+                $MoreData = Invoke-StatAuthentication
+            }
         }
     }
     while ($MoreData)
@@ -641,7 +650,170 @@ Function Get-StatIpAddr
     Return Get-StatResource -all:$all -resource "cdt_ipaddr" -object $IPID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
 }
 
+Function Import-StatMap
+{
+    param
+    (
+        $MapPath
+    )
 
+    $Map = get-content $MapPath | convertfrom-json
+
+    return $Map
+}
+
+Function New-StatDrilldownObject
+{
+    param (
+        $dashuri = $null,
+        $dashboard = $null,
+        $includeVers = $null,
+        $keepTime = $False, 
+        $params = $null,
+        $targetBlank = $False,
+        $title = $null,
+        $type = "disabled",
+        $url = $null,
+        $url_params = $null
+    )
+    $Return = [pscustomobject]@{
+        "dashuri" = $dashuri
+        "dashboard" = $dashboard
+        "includeVers" = $includeVers
+        "keepTime" = $keepTime
+        "params" = $params
+        "targetBlank" = $targetBlank
+        "title" = $title
+        "type" = $type
+        "url" = $url
+        "url_params" = $url_params
+    }
+
+    return $Return
+}
+
+Function New-StatColoringObject
+{
+    param (
+        $color = "rgba(50,172,43,0.97)",
+        $from = $null,
+        $mode = "bg",
+        $text = "up",
+        $to = $null,
+        $type = "regex"
+    )
+
+    return $null
+}
+
+Function New-StatColoringArray
+{    
+    @((New-StatColoringObject -color "rgba(50,172,43,0.97)"), (New-StatColoringObject -color "#bf1b00" -text down))
+}
+
+Function New-StatLatLng
+{
+    param (
+        $lat = 0,
+        $lng = 0
+    )
+
+    return [pscustomobject]@{
+        "lat" = $lat
+        "lng" = $lng
+    }
+}
+
+Function New-StatMapObject 
+{
+    param
+    (
+        $bgColor = "rgba(64,64,64,1.000)",
+        $coloring = (New-StatColoringArray),
+        $dateFormat = "YYYY-MM-DD HH:mm:ss",
+        $decimals = 2,
+        $displayName = "default",
+        $drilldown = (new-statdrilldown),
+        $entity = $null,
+        $fontColor = "rgba(255,255,255,1.000)",
+        $fontSize = $null,
+        $icon = $null,
+        $id = $null,
+        $index = $null,
+        $labelPos = "bottom",
+        $labelbgColor = "rgba(64,64,64,1.000)",
+        $layerid = $null,
+        $location = [pscustomobject]@{
+            "lat" = 0
+            "lng" = 0
+        },
+        $markerType = "text",
+        $metric = "ifOperStatus - Stage",
+        $metricType = "string",
+        $name = "interface",
+        $nameOverride = $null,
+        $nodeSize = $null,
+        $refId = "B",
+        $renderLabel = $False,
+        $renderValue = $true,
+        $showLabel = $False,
+        $type = "node",
+        $unitFormat = "none",
+        $valueMappingIds = @(),
+        $valuePreUnit = "",
+        $valueUnit = $null,
+        $visible = $true
+    )
+
+    return [pscustomobject]@{
+        "bgColor" = $bgColor
+        "coloring" = $coloring
+        "dateFormat" = $dateFormat
+        "decimals" = $decimals
+        "displayName" = $displayName
+        "drilldown" = $drilldown
+        "entity" = $entity
+        "fontColor" = $fontColor
+        "fontSize" = $fontSize
+        "icon" = $icon
+        "id" = $id
+        "index" = $index
+        "labelPos" = $labelPos
+        "labelbgColor" = $labelbgColor
+        "layerid" = $layerid
+        "location" = $location
+        "markerType" = $markerType
+        "metric" = $metric
+        "metricType" = $metricType
+        "name" = $name
+        "nameOverride" = $nameOverride
+        "nodeSize" = $nodeSize
+        "refId" = $refId
+        "renderLabel" = $renderLabel
+        "renderValue" = $renderValue
+        "showLabel" = $showLabel
+        "type" = $type
+        "unitFormat" = $unitFormat
+        "valueMappingIds" = $valueMappingIds
+        "valuePreUnit" = $valuePreUnit
+        "valueUnit" = $valueUnit
+        "visible" = $visible
+    }
+
+}
+
+Function Invoke-StatMapGeneration
+{
+    param
+    (
+        $RootObjects
+    )
+
+    foreach ($RootObject in $RootObjects)
+    {
+        ##$RootObject.
+    }
+}
 
 ##Load any saved variables
 Invoke-StatVariableLoad
