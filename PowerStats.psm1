@@ -305,7 +305,7 @@ Function Invoke-StatRequest
 
     }
 
-    $offset = 0
+    $offset = [int]0
     do 
     {
         try {
@@ -313,7 +313,7 @@ Function Invoke-StatRequest
 
             if ($StatAuthType -eq "Token")
             {   
-                Write-Verbose $StatAPIToken
+                ##Write-Verbose $StatAPIToken
                 $Headers = @{"Authorization" = "Bearer $StatAPIToken"}
                 $Headers.keys | Write-Debug
                 $Headers.Values | Write-Debug 
@@ -329,9 +329,17 @@ Function Invoke-StatRequest
                                                 -Credential $Credential
             } 
 
+            if ($uri -match "limit")
+            {
+                $ignore = $uri -match "limit=(\d{1,5})"
+                $offset += [int]$matches[1]
+            }
+            else
+            {
+                $offset += 50
+            }
 
             $MoreData = (($PageReturn.Links | where {$_.rel -eq "Last"}) -ne $null)
-            $offset += 50
 
             $FullReturn = Merge-StatReturn $FullReturn $PageReturn
 
@@ -352,6 +360,12 @@ Function Invoke-StatRequest
             {
                 Write-Verbose "Session may have expired, trying to reauthenticate"
                 $MoreData = Invoke-StatAuthentication
+            }
+            else
+            {
+                Write-Verbose "Error encountered, exiting and dumping all data"
+                Write-Verbose $Error[0].Exception
+                $MoreData = $false
             }
         }
     }
@@ -547,6 +561,77 @@ Function Get-StatDevice
     Return Get-StatResource -all:$all -resource "cdt_device" -object $DeviceID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
 }
 
+Function Get-StatDevicePorts
+{
+    param
+    (
+        $DeviceID,
+        $PortID,
+        $filterstring,
+        $properties,
+        [switch]
+        $all,
+        [switch]
+        $allProperties,
+        [switch]
+        $RawData
+    )
+    $filterstring = "?"
+    if ($PortID)
+    {
+        $filterstring += "id_filter=IN($PortID)&"
+    }
+
+    if ($DeviceID)
+    {
+        $filterstring += "deviceid_filter=IN($DeviceID)&"
+    }
+
+    $filterstring += "limit=500&"
+
+    Return Get-StatResource -all:$all -resource "cdt_port" -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
+}
+
+Function Get-StatConnectedDevices
+{
+    param
+    (
+        $DeviceID,
+        $PortID,
+        $filterstring,
+        $properties,
+        [switch]
+        $all,
+        [switch]
+        $allProperties,
+        [switch]
+        $RawData
+    )
+    $filterstring = "?"
+    if ($PortID)
+    {
+        $filterstring += "connected_port_filter=IN($PortID)&"
+    }
+
+    if ($DeviceID)
+    {
+        $filterstring += "connected_device_filter=IN($DeviceID)&"
+    }
+
+    $filterstring += "limit=5000&"
+
+    $return = Get-StatResource -all:$all -resource "mis_record" -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
+    if ($DeviceID -or $PortID)
+    {
+
+        Return $Return | where {$_.connected_port -eq $PortID -or $_.connected_device -eq $DeviceID}
+   
+    }
+    else {
+        return $Return
+    }
+}
+
 Function Get-StatPropertyLinks
 {
     param
@@ -578,6 +663,22 @@ Function Get-StatDevicePropertyLinks
     return (Get-StatPropertyLinks "cdt_device" $DeviceID)
 }
 
+Function Get-StatDeviceGroups
+{
+    param
+    (
+        $DeviceID,
+        $PortID,
+        $filterstring,
+        [switch]
+        $all,
+        [switch]
+        $RawData
+    )
+
+    return Get-StatResource -all:$all -resource "group" -filterstring $filterstring -properties @("id","name") -allproperties:$allProperties -RawData:$RawData
+}
+
 Function Get-StatDeviceInventory
 {
     param
@@ -595,6 +696,7 @@ Function Get-StatDeviceInventory
 
     Return Get-StatResource -all:$all -resource "cdt_inventory_device" -object $DeviceID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
 }
+
 
 Function Get-StatInventory
 {
@@ -1063,16 +1165,42 @@ Function New-StatWidgetTarget
     }
 }
 
-Function Invoke-StatMapGeneration
+Function Invoke-StatMapGenerationFromGroup
 {
     param
     (
-        $RootObjects
+        $RootObjects,
+        $GroupIDs,
+        $GroupingMode = "OR"
     )
+
+    $tofs = $ofs
+
+    $ofs = ","
+
+    $filterstring = "groups=$GroupIDs&grouping_mode=$GroupingMode"
+
+    $ofs = $tofs
+
+    $AllDevices = Get-StatDevice -allproperties -filterstring $filterstring
 
     foreach ($RootObject in $RootObjects)
     {
-        ##$RootObject.
+        $ConnectedDevices = Find-ConnectedDevices $RootObject.id
+    }
+}
+
+Function Find-ConnectedDevices
+{
+    param
+    (
+        $deviceid,
+        $layer = 2
+    )
+
+    if ($layer = 2)
+    {
+
     }
 }
 
