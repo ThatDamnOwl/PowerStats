@@ -943,7 +943,124 @@ Function New-StatMapSensorObject
         "valueUnit" = $valueUnit
         "visible" = $visible
     }
+}
 
+Function New-StatTargetField 
+{
+    param
+    (
+        $alias = "",
+        $aliasOverride = $false,
+        $datatype = "",
+        $format = @{},
+        $id = "",
+        $options = @{},
+        $polltype = "",
+        $statsExpand = $false,
+        $text = "",
+        $value = ""
+    )
+
+    return [pscustomobject]@{
+        "alias" = $alias
+        "aliasOverride" = $aliasOverride
+        "datatype" = $datatype
+        "format" = $format
+        "id" = $id
+        "options" = $options
+        "polltype" = $polltype
+        "statsExpand" = $statsExpand 
+        "text" = $text
+        "value" = $value
+    }
+}
+
+Function New-StatFieldFormat
+{
+    param 
+    (
+        $alias = "",
+        $datatype = "",
+        $value = ""
+    )
+
+    return [pscustomobject]@{
+        "alias" = $alias
+        "datatype" = $datatype
+        "value" = $value
+    }
+}
+
+Function New-StatFieldOptions
+{
+    param
+    (
+        $states = @{},
+        $stats = @{}
+    )
+
+    return [pscustomobject]@{
+        "states" = $states
+        "stats" = $stats
+    }
+}
+
+Function New-StatFieldFilter
+{
+    param
+    (
+        $action = "",
+        $field = @{},
+        $value = ""
+    )
+
+    return [pscustomobject]@{
+        "action" = $action
+        "field" = $field
+        "value" = $value
+    }
+}
+
+Function New-StatWidgetTarget
+{
+    param 
+    (
+        $field,
+        $fields = @(),
+        $filters = @(),
+        $group_by = @{},
+        $groups = @(),
+        $hide = $false,
+        $interval = $null,
+        $label = @(),
+        $limit = $null,
+        $object = $null,
+        $panelType = $null,
+        $queryType = $null,
+        $refId = $null,
+        $sort = @(),
+        $summary = $null,
+        $version = 1 
+    )
+
+    return [pscustomobject]@{
+        "field" = $field
+        "fields" =  $fields
+        "filters" = $filters
+        "group_by" = $group_by
+        "groups" = $groups
+        "hide" = $hide
+        "interval" = $interval
+        "label" = $label
+        "limit" = $limit
+        "object" = $object
+        "panelType" = $panelType
+        "queryType" = $queryType
+        "refId" = $refId
+        "sort" = $sort
+        "summary" = $summary
+        "version" = $version
+    }
 }
 
 Function Invoke-StatMapGeneration
