@@ -364,7 +364,11 @@ Function Invoke-StatRequest
             else
             {
                 Write-Verbose "Error encountered, exiting and dumping all data"
-                Write-Verbose $Error[0].Exception
+                if ($Error[0].Exception)
+                {
+
+                    $Error[0].Exception.tostring() | Write-Debug
+                }
                 $MoreData = $false
             }
         }
@@ -548,6 +552,7 @@ Function Get-StatDevice
     param
     (
         $DeviceID,
+        $GroupIDs,
         $filterstring,
         $properties,
         [switch]
@@ -557,6 +562,21 @@ Function Get-StatDevice
         [switch]
         $RawData
     )
+
+    if ($GroupIDs)
+    {
+        if (-not $filterstring)
+        {
+            $filterstring = "?"
+        }
+
+        $tofs = $ofs
+        $ofs = ","
+
+        $filterstring += "groups=$GroupIDs&"
+
+        $ofs = $tofs
+    }
 
     Return Get-StatResource -all:$all -resource "cdt_device" -object $DeviceID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
 }
@@ -592,7 +612,7 @@ Function Get-StatDevicePorts
     Return Get-StatResource -all:$all -resource "cdt_port" -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
 }
 
-Function Get-StatConnectedDevices
+Function Get-StatIPPortInfo
 {
     param
     (
@@ -697,7 +717,6 @@ Function Get-StatDeviceInventory
     Return Get-StatResource -all:$all -resource "cdt_inventory_device" -object $DeviceID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
 }
 
-
 Function Get-StatInventory
 {
     param
@@ -731,7 +750,7 @@ Function Get-StatIpAddress
         $RawData
     )
 
-    Return Get-StatResource -all:$all -resource "cdt_ipaddress" -object $IPID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
+    Return Get-StatResource -all:$all -resource "cdt_ip_address" -object $IPID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
 }
 
 Function Get-StatIpAddr
@@ -749,7 +768,7 @@ Function Get-StatIpAddr
         $RawData
     )
 
-    Return Get-StatResource -all:$all -resource "cdt_ipaddr" -object $IPID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
+    Return Get-StatResource -all:$all -resource "cdt_ip_addr" -object $IPID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
 }
 
 Function Import-StatMap
@@ -1178,16 +1197,29 @@ Function Invoke-StatMapGenerationFromGroup
 
     $ofs = ","
 
-    $filterstring = "groups=$GroupIDs&grouping_mode=$GroupingMode"
+    $filterstring = "groups=$GroupIDs&"
 
     $ofs = $tofs
 
-    $AllDevices = Get-StatDevice -allproperties -filterstring $filterstring
+    $AllDevices = Get-StatDevice -allproperties
+
+    $AllIPAddresses = Get-StatIpAddress -allproperties
+
+    $AllGroupDevices = Get-StatDevice -allproperties -filterstring $filterstring
+
+
 
     foreach ($RootObject in $RootObjects)
     {
-        $ConnectedDevices = Find-ConnectedDevices $RootObject.id
+        $ConnectedDevices = Find-ConnectedDevices -deviceid $RootObject.id | where {$_.conn}
+
+        foreach ($ConnectedDevice in $ConnectedDevices)
+        {
+            i
+        }
     }
+
+    return $AllDevices
 }
 
 Function Find-ConnectedDevices
@@ -1198,9 +1230,15 @@ Function Find-ConnectedDevices
         $layer = 2
     )
 
-    if ($layer = 2)
-    {
+    $AllIPAddresses = Get-StatIpAddress -allproperties
 
+    if ($layer -eq 2)
+    {
+        Get-StatIPPortInfo -deviceid $deviceid -allproperties
+    }
+    elseif ($layer -eq 3)
+    {
+        return $null
     }
 }
 
