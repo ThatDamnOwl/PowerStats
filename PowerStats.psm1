@@ -1222,6 +1222,325 @@ Function Invoke-StatMapGenerationFromGroup
     return $AllDevices
 }
 
+Function Optimize-StatMap
+{
+    param
+    (
+        $StatMapObject,
+        $RootNode
+    )
+
+    ##foreach 
+}
+
+Function Optimize-StatMapNodeNeighbors
+{
+    param
+    (
+        $StatMapObject,
+        $RootNode,
+        $RecurseDepth,
+        $XStep = 100,
+        $YStep = 75,
+        [switch]
+        $reverse,
+        $MovedNodes,
+        $RootNodes,
+        [switch]
+        $Nested
+    )
+
+    Write-Debug "StatMapObject sensor count - $(($StatMapObject.sensors | gm | select -expandproperty name | where {$_ -match "_"}).count)"
+
+    
+    Write-Debug "RecurseDepth - $RecurseDepth"
+
+    #$Sensors = $StatMapObject.sensors | gm | select -expandproperty name | where {$_ -match "_"}
+    
+    Write-Debug "Sensor count is $(($StatMapObject.sensors | gm | select -expandproperty name | where {$_ -match "_"}).count)"
+
+    if ($MovedNodes -eq $Null)
+    {
+        Write-Debug "No moved nodes provided, fixing the root node in place"
+        $MovedNodes = @($RootNode)
+    }
+    else {
+        Write-Debug "there are $($MovedNodes.count) moved nodes"
+    }
+
+    if ($RootNodes -eq $Null)
+    {
+        Write-Debug "RootNode ID - $($RootNode.id)"
+        $RootNodes = @($RootNode)
+    }
+    else
+    {
+        Write-Debug "RootNode Count - $($RootNodes.count)"
+    }
+
+    $NewlyMovedNodes = @()
+    foreach ($CurrRootNode in $RootNodes)
+    {
+
+        $MoveableNodes = (Get-StatMapConnectedNodes $StatMapObject $CurrRootNode | where {$_.id -notin ($MovedNodes).id} | sort nameOverride,name)
+
+        Write-Debug "There are $($MoveableNodes.count) moveable nodes attached to this one"
+
+        $MoveableNodeCount = 0
+
+        foreach ($MoveableNode in $MoveableNodes)
+        {
+            $MoveableNodeCount++
+            if ($MoveableNode.nameOverride -ne "")
+            {
+                $NodeName = $MoveableNode.nameOverride
+            }
+            elseif ($MoveableNode.name -ne "") {
+                $NodeName = $MoveableNode.name
+            }
+            else{
+                $NodeName = $MoveableNode.id
+            }
+
+            $FindingFit = $false
+
+            $Left = ($CurrRootNode.location.lng -le $RootNode.location.lng) -or ($MoveableNodeCount -eq 1)
+
+            $iter = 0
+
+            $MoveableNode.location.lat = [int]($CurrRootNode.location.lat + ($YStep * -1)) 
+
+            do
+            {
+
+                if ($Left)
+                {
+                    $X = $XStep * $Iter * -1
+                }
+                else
+                {
+                    $X = $XStep * $Iter
+                }
+
+                $Iter++
+                if (($MoveableNodes.count -ne $null) -or $FindingFit)
+                {
+                    Write-Debug "more than one node in interation or second iteration"
+                    $MoveableNode.location.lng = [int]($RootNode.location.lng + $X)
+                }
+                else {
+                    Write-Debug "Only one node in interation"
+                    $MoveableNode.location.lng = [int]($CurrRootNode.location.lng)
+                }
+                
+                Write-Debug "Checking if $NodeName fits at location X - $($MoveableNode.location.lng) - Y - $($MoveableNode.location.lat)"
+
+                if (-not (Check-StatMapNodeCollision $MoveableNode ($MovedNodes + $NewlyMovedNodes) ($XStep/2) ($YStep/2)))
+                {
+                    $NewlyMovedNodes += $MoveableNode
+                    $FindingFit = $false
+                }
+                else
+                {
+                    $FindingFit = $True
+                }
+            }
+            while ($FindingFit)
+        }
+        $MovedNodes = $NewlyMovedNodes + $MovedNodes
+    }
+
+    foreach ($MovedNode in $NewlyMovedNodes)
+    {
+        $StatMapObject.sensors."$($MovedNode.id)" = $MovedNode
+    }
+
+
+    if ($RecurseDepth -gt 1)
+    {
+
+        $NewDepth = ($RecurseDepth - 1)
+        Write-Verbose "depth is $RecurseDepth, going one layer deeper - $NewDepth"
+        Write-Debug "Normal ordering for next layer"
+        $Return = Optimize-StatMapNodeNeighbors -StatMapObject $StatMapObject `
+                                                       -RootNode $RootNode `
+                                                       -RootNodes $NewlyMovedNodes `
+                                                       -RecurseDepth $NewDepth `
+                                                       -MovedNodes $MovedNodes `
+                                                       -Nested
+
+        if ($Return -ne $null)
+        {
+            $StatMapObject = $Return.SMO
+            $MovedNodes = $Return.Moved
+        }
+    }
+    else {
+        
+    }
+
+
+    if ($Nested)
+    {
+        Write-Debug "Returning SMO and moved info"
+        return [pscustomobject]@{"SMO" = $StatMapObject; "Moved" = $MovedNodes}
+    }
+    else {
+        Write-Debug "Returning only SMO"
+        return $StatMapObject
+    }
+}
+
+Function Check-StatMapNodeCollision
+{
+    param
+    (
+        $Node,
+        $CheckNodes,
+        $ToleranceX = 25,
+        $ToleranceY = 10
+    )
+
+    $Collision = $false
+
+    foreach ($CheckNode in $CheckNodes)
+    {
+        $Collision =(($Node.location.lat -lt ($CheckNode.location.lat + $ToleranceX)) -and `
+                     ($Node.location.lat -gt ($CheckNode.location.lat - $ToleranceX)) -and `
+                     ($Node.location.lng -lt ($CheckNode.location.lng + $ToleranceY)) -and `
+                     ($Node.location.lng -gt ($CheckNode.location.lng - $ToleranceY))) -or `
+                     $Collision
+
+    }
+
+    Write-Debug "$($Node.id) Collision is $Collision"
+
+    return $Collision
+}
+
+Function Get-StatMapGridSnap
+{
+    param
+    (
+        $StatMapObject,
+        $GridSize = 25
+    )
+
+}
+
+Function Get-StatMapConnectedNodes
+{
+    param
+    (
+        $StatMapObject,
+        $Node,
+        $Depth = 1
+    )
+
+    $ConnectedNodes = @($Node)
+
+    for ($x = 0; $x -lt $Depth; $x++)
+    {
+        foreach ($ConnectedNode in $ConnectedNodes)
+        {
+            $ConnectedLines = Get-StatMapConnectedLines $StatMapObject $ConnectedNode
+            #$ConnectedLines
+            $ConnectedNodes = ($ConnectedNodes + ($ConnectedLines | %{Get-StatMapLineNodeConnections $StatMapObject $_} `
+                                                                  | where {$_.id -notin $ConnectedNodes.id})) `
+                                                                  | where {($_.id -ne $Node.id)}
+        }
+    }
+
+    return $ConnectedNodes
+}
+
+Function Get-StatMapConnectedLines
+{
+    param
+    (
+        $StatMapObject,
+        $Node
+    )
+
+    $PropertyString = 'snapPoints | %{if ($_ -ne $null){$_ | gm | select -expandproperty name}}'
+    $FindValue = $Node.id
+    $Operator = "-eq"
+
+    $Conditions = @(
+        [pscustomobject]@{
+            "Property" = $PropertyString
+            "FindValue" = """$FindValue"""
+            "Operator" = $Operator
+        }
+    )
+
+    return Get-StatMapSensorsFiltered $StatMapObject $Conditions
+}
+
+Function Get-StatMapLineNodeConnections
+{
+    param
+    (
+        $StatMapObject,
+        $Line
+    )
+
+    $LineConnections = $Line.snapPoints | gm | select -expandproperty name | where {$_ -match "_"}
+
+    $tofs = $ofs
+    $ofs = ""","""
+
+    $Return = $LineConnections | %{
+        $StatMapObject.Sensors."$_"
+    }
+
+    $ofs = $tofs
+
+    return $Return
+}
+
+Function Get-StatMapSensorsFiltered
+{
+    param
+    (
+        $StatMapObject,
+        $Conditions,
+        $ConditionLink = "or"
+    )
+
+    $Sensors = $StatMapObject.sensors | gm | where {$_.MemberType -eq "NoteProperty"} | select -expandproperty name 
+
+    $MatchingNodes = @()
+
+    foreach ($Condition in $Conditions)
+    {
+        $ConditionMatchNodes = @()
+
+        foreach ($Sensor in $Sensors)
+        {
+            $ExpressionString =  '($StatMapObject'
+            $ExpressionString += ".sensors.'$($Sensor)'.$($Condition.Property)) "
+            $ExpressionString += "$($Condition.Operator) "
+            $ExpressionString += "$($Condition.FindValue)"
+            if (invoke-expression $ExpressionString)
+            {
+                $ConditionMatchNodes += $StatMapObject.sensors."$Sensor"
+            }
+        }
+
+        if ($ConditionLink -eq "or")
+        {
+            $MatchingNodes += $ConditionMatchNodes
+        }
+        elseif ($ConditionLink -eq "and")
+        {
+            ##Not implemented because lazy
+        }
+    }
+
+    return $MatchingNodes
+}
+
 Function Find-ConnectedDevices
 {
     param
