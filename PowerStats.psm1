@@ -1,3 +1,6 @@
+## Required Module imports
+
+Import-module CommonFunctions -force
 
 # Module Variables plus getters/setters
 
@@ -61,6 +64,15 @@ Function Set-StatAuthType
     set-variable -scope 1 -name StatAuthType -Value $NewAuthType
 }
 
+Function Set-StatApiToken
+{
+    param (
+        $NewAPIToken
+    )
+
+    set-variable -scope 1 -name StatAPIToken -value $NewAPIToken
+}
+
 Function Get-StatServer
 {
     $StatServer
@@ -99,49 +111,27 @@ Function Get-StatApiToken
 Function Invoke-StatVariableSave 
 {
     $AllVariables = Get-Variable -scope 1 | where {$_.name -match "Stat"}
-    $VariableStore = @{}
-    foreach ($Variable in $AllVariables)
-    {
-        if ($Variable.value.GetType().name -eq "PSCredential")
-        {
-            $VariableStore += @{
-                                   "username" = $Variable.value.username
-                                   "securepass" = ($Variable.value.Password | ConvertFrom-SecureString)
-                               }
-        }
-        else {
-            $VariableStore += @{$Variable.name = $Variable.Value}
-        }
-    }
+    $SavePath = "$ModuleFolder\$($ENV:Username)-Variables.json"
 
-    $VariableStore.GetEnumerator() | export-csv "$ModuleFolder\$($ENV:Username)-Variables.csv"
+    Write-Debug "Starting save job to $SavePath"
+
+    Invoke-VariableJSONSave -ModuleName "PowerStats" -SavePath $SavePath -Variables $AllVariables -verbosepreference:$VerbosePreference
 }
 
 Function Invoke-StatVariableLoad
 {
-    $VariablePath = "$ModuleFolder\$($ENV:Username)-Variables.csv"
+    $VariablePath = "$ModuleFolder\$($ENV:Username)-Variables.json"
     if (test-path $VariablePath)
     {
-        $VariableStore = import-csv $VariablePath
+        Write-Verbose "Importing variables from $VariablePath"
+        $Variables = Invoke-VariableJSONLoad $VariablePath
 
-        foreach ($Variable in $VariableStore)
+        foreach ($Variable in $Variables)
         {
-            if ($Variable.name -match "(username|securepass)")
-            {
-                if ($Variable.name -eq "username")
-                {
-                    Write-Debug "Importing StatCredential"
-                    $EncString = ($VariableStore | where {$_.name -eq "securepass"}).Value | ConvertTo-SecureString
-                    $Credential = New-Object System.Management.Automation.PsCredential($Variable.Value, $EncString)
-                    set-variable -scope 1 -name StatCredential -value $Credential
-                }
-            }
-            else
-            {
-                Write-Debug "Importing $($Variable.name)"
-                set-variable -scope 1 -name $Variable.Name -value $Variable.Value
-            }
+            Write-Debug "Importing variable $($Variable.name)"
+            set-variable -name $Variable.name -Value $Variable.Value -scope 1
         }
+
     }
 
 }
@@ -386,7 +376,9 @@ Function Invoke-StatAuthentication
         [switch]
         $Token,
         [switch]
-        $Basic
+        $Basic,
+        [switch]
+        $DesignatedOnly
     )
 
     if ($Creds -eq $null)
@@ -417,9 +409,12 @@ Function Invoke-StatAuthentication
         {
             Write-Verbose "Authentication failed, please try again"
 
-            if (Invoke-StatAuthentication $Creds -Basic)
-            {
-                Write-Verbose "HINT - Try basic authentication"
+            if (-not $DesignatedOnly)
+            {       
+                if (Invoke-StatAuthentication $Creds -Basic -DesignatedOnly)
+                {
+                    Write-Verbose "HINT - Try basic authentication"
+                }
             }
 
             return $False
@@ -445,10 +440,12 @@ Function Invoke-StatAuthentication
         catch
         {
             Write-Verbose "Authentication failed, please try again"
-
-            if (Invoke-StatAuthentication $Creds -Token)
-            {
-                Write-Verbose "HINT - Try token authentication"
+            if (-not $DesignatedOnly)
+            {  
+                if (Invoke-StatAuthentication $Creds -Token -DesignatedOnly)
+                {
+                    Write-Verbose "HINT - Try token authentication"
+                }
             }
             return $False
         }
@@ -643,9 +640,7 @@ Function Get-StatIPPortInfo
     $return = Get-StatResource -all:$all -resource "mis_record" -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
     if ($DeviceID -or $PortID)
     {
-
         Return $Return | where {$_.connected_port -eq $PortID -or $_.connected_device -eq $DeviceID}
-   
     }
     else {
         return $Return
@@ -742,6 +737,7 @@ Function Get-StatIpAddress
         $IPID,
         $filterstring,
         $properties,
+        $DeviceID,
         [switch]
         $all,
         [switch]
@@ -749,6 +745,11 @@ Function Get-StatIpAddress
         [switch]
         $RawData
     )
+
+    if ($DeviceID)
+    {
+        $filterstring += "limit=5000&"
+    }
 
     Return Get-StatResource -all:$all -resource "cdt_ip_address" -object $IPID -filterstring $filterstring -properties $properties -allproperties:$allProperties -RawData:$RawData
 }
@@ -829,7 +830,7 @@ Function New-StatColoringObject
 
 Function New-StatColoringArray
 {    
-    @((New-StatColoringObject -color "rgba(50,172,43,0.97)"), (New-StatColoringObject -color "#bf1b00" -text down))
+    return @((New-StatColoringObject -color "rgba(50,172,43,0.97)"), (New-StatColoringObject -color "#bf1b00" -text down))
 }
 
 Function New-StatLatLng
@@ -1207,30 +1208,97 @@ Function Invoke-StatMapGenerationFromGroup
 
     $AllGroupDevices = Get-StatDevice -allproperties -filterstring $filterstring
 
-
+    Check-ModuleDependencies @("PowerJuniper", "PowerMist", "PowerPalo")
 
     foreach ($RootObject in $RootObjects)
     {
-        $ConnectedDevices = Find-ConnectedDevices -deviceid $RootObject.id | where {$_.conn}
+        $ConnectedDevices = @()
+        $ConnectedDevices += Find-StatConnectedDevices -device $RootObject
+        if ($RootObject.Vendor -match "(Juniper|Unknown)")
+        {
+            try
+            {
+                $ConnectedDevices += Find-StatConnectedJuniperDevices -device $RootObject
+            }   
+            catch
+            {
+
+            }
+
+            try
+            {
+                $ConnectedDevices += Find-StatConnectedMistDevices -device $RootObject
+            }
+            catch
+            {
+
+            }
+        }
+        if ($RootObject.Vendor -match "(Palo|Unknown)")
+        {
+            try 
+            {
+                $ConnectedDevices += Find-StatConnectedPaloDevices -device $RootObject
+            }
+            catch
+            {
+
+            }
+        }
 
         foreach ($ConnectedDevice in $ConnectedDevices)
         {
-            i
+            
         }
     }
 
     return $AllDevices
 }
 
-Function Optimize-StatMap
+Function Find-StatConnectedJuniperDevices
 {
     param
     (
-        $StatMapObject,
-        $RootNode
+        $Device
     )
 
-    ##foreach 
+    $IPAddresses = Get-StatIpAddress -allProperties | where {$_.deviceid -eq $Device.id}
+
+    $ManagementInterface = $null
+    $IPAddressIndex = 0
+    do
+    {
+        $IPAddressTemp = $IPAddresses[$IPAddressIndex]
+
+        try 
+        {
+            
+        }
+        catch
+        {
+
+        }
+        $SearchingForValidManagementInterface = $ManagementInterface -eq $null
+    }
+    while ($SearchingForValidManagementInterface)
+}
+
+Function Find-StatConnectedPaloDevices
+{
+    param
+    (
+        $Device
+    )
+
+}
+
+Function Find-StatConnectedMistDevices
+{
+    param
+    (
+        $Device
+    )
+
 }
 
 Function Optimize-StatMapNodeNeighbors
@@ -1541,7 +1609,7 @@ Function Get-StatMapSensorsFiltered
     return $MatchingNodes
 }
 
-Function Find-ConnectedDevices
+Function Find-StatConnectedDevices
 {
     param
     (
@@ -1553,7 +1621,8 @@ Function Find-ConnectedDevices
 
     if ($layer -eq 2)
     {
-        Get-StatIPPortInfo -deviceid $deviceid -allproperties
+        $ConnectedIPs = Get-StatIPPortInfo -deviceid $deviceid -allproperties
+        return $AllIPAddresses | where {$_.ipaddress -in $ConnectedIPs.ip} | select -expandproperty deviceid
     }
     elseif ($layer -eq 3)
     {
