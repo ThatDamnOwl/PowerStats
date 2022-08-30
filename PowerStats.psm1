@@ -12,6 +12,8 @@ $StatAPIPath = "$($StatProtocol)://$($StatServer)$($StatAPIRoot)"
 $StatCredential = $null
 $StatAPIToken = ""
 $StatAuthType = "token"
+$StatStoredJuniperCredentials = @()
+$StatStoredPaloCredentials = @()
 $StatSkipProperties = @("id")
 
 $ModuleFolder = (Get-Module PowerStats -ListAvailable).path -replace "PowerStats\.psm1"
@@ -73,6 +75,16 @@ Function Set-StatApiToken
     set-variable -scope 1 -name StatAPIToken -value $NewAPIToken
 }
 
+Function Set-StatStoredJuniperCredentials
+{
+    param
+    (
+        $NewStatStoredJuniperCredentials
+    )
+
+    set-variable -scope 1 -name StatStoredJuniperCredentials -value $NewStatStoredJuniperCredentials
+}
+
 Function Get-StatServer
 {
     $StatServer
@@ -106,6 +118,11 @@ function Get-StatAuthType
 Function Get-StatApiToken
 {
     $StatAPIToken
+}
+
+Function Get-StatStoredJuniperCredentials
+{
+    $StatStoredJuniperCredentials
 }
 
 Function Invoke-StatVariableSave 
@@ -389,7 +406,7 @@ Function Invoke-StatAuthentication
         
     }
 
-    if ($StatAuthType -eq "Token" -or $Token)
+    if ($StatAuthType.tolower() -eq "token" -or $Token)
     {
         ## TODO
         $Body = @{
@@ -746,7 +763,7 @@ Function Get-StatIpAddress
         $RawData
     )
 
-    if ($DeviceID)
+    if (-not $DeviceID)
     {
         $filterstring += "limit=5000&"
     }
@@ -1194,13 +1211,15 @@ Function Invoke-StatMapGenerationFromGroup
         $GroupingMode = "OR"
     )
 
-    $tofs = $ofs
+    if ($GroupIDs)
+    {
+        $tofs = $ofs
 
-    $ofs = ","
+        $ofs = ","
+        $filterstring = "groups=$GroupIDs&"
 
-    $filterstring = "groups=$GroupIDs&"
-
-    $ofs = $tofs
+        $ofs = $tofs
+    }
 
     $AllDevices = Get-StatDevice -allproperties
 
@@ -1218,7 +1237,12 @@ Function Invoke-StatMapGenerationFromGroup
         {
             try
             {
-                $ConnectedDevices += Find-StatConnectedJuniperDevices -device $RootObject
+
+                $JuniperConnectedDevices = Find-StatConnectedJuniperDevices -device $RootObject
+
+                return $JuniperConnectedDevices
+
+                $ConnectedDevices += $JuniperConnectedDevices
             }   
             catch
             {
@@ -1259,26 +1283,67 @@ Function Find-StatConnectedJuniperDevices
 {
     param
     (
-        $Device
+        $Device,
+        $DeviceList
     )
 
-    $IPAddresses = Get-StatIpAddress -allProperties | where {$_.deviceid -eq $Device.id}
-
+    $IPAddresses = Get-StatIpAddress -allProperties | where {$_.deviceid -eq $Device.deviceid}
     $ManagementInterface = $null
     $IPAddressIndex = 0
     do
     {
         $IPAddressTemp = $IPAddresses[$IPAddressIndex]
 
+        Write-Verbose "Trying IP $($IPAddressTemp.ipaddress)"
+
+        $IPAddressIndex++
+
         try 
         {
-            
+            if (Test-HostStatus $IPAddressTemp.ipaddress -timeout 2000)
+            {
+                Write-Verbose "Host is alive"
+                foreach ($StoredCredential in $StatStoredJuniperCredentials)
+                {
+                    try 
+                    {
+                        $ConnectedStatDevices = @()
+                        $Result = (Get-JuniperLLDPNeighbors $IPAddressTemp.ipaddress `
+                                                                          $StoredCredential)
+
+
+                        $ConnectedDevices = $Result.'lldp-neighbors-information'.'lldp-neighbor-information'
+                        
+
+                        foreach ($ConnectedDevice in $ConnectedDevices)
+                        {
+                            $ConnectedDevice = ($ConnectedDeviceName -split "\.")[0]
+                            $StatDevice = $DeviceList | where {$_.name -match $ConnectedDevice}
+                            $Ports = Get-statdeviceports -deviceid $StatDevice.deviceid -allproperties
+
+                            $ConnectedStatDevices += 
+                        }
+
+                        return $ConnectedStatDevices
+                    }
+                    catch
+                    {
+
+                    }
+                }
+            }
+            else 
+            {
+                Write-Verbose "Host is offline"
+                
+            }
         }
         catch
         {
 
         }
-        $SearchingForValidManagementInterface = $ManagementInterface -eq $null
+
+        $SearchingForValidManagementInterface = ($ManagementInterface -eq $null) -and ($IPAddressIndex -lt $IPAddresses.Count)
     }
     while ($SearchingForValidManagementInterface)
 }
