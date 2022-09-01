@@ -1,7 +1,7 @@
 ## Required Module imports
 
 Import-module CommonFunctions -force
-
+Import-module PowerJuniper -force
 # Module Variables plus getters/setters
 
 ## Default Variables
@@ -15,6 +15,7 @@ $StatAuthType = "token"
 $StatStoredJuniperCredentials = @()
 $StatStoredPaloCredentials = @()
 $StatSkipProperties = @("id")
+$StatDeviceCache = $null
 
 $ModuleFolder = (Get-Module PowerStats -ListAvailable).path -replace "PowerStats\.psm1"
 
@@ -145,8 +146,8 @@ Function Invoke-StatVariableLoad
 
         foreach ($Variable in $Variables)
         {
-            Write-Debug "Importing variable $($Variable.name)"
-            set-variable -name $Variable.name -Value $Variable.Value -scope 1
+            Write-Debug "Importing $($Variable.value.GetType()) variable $($Variable.name)"
+            set-variable -name $Variable.name -Value:$Variable.Value -scope 1
         }
 
     }
@@ -1231,16 +1232,32 @@ Function Invoke-StatMapGenerationFromGroup
 
     foreach ($RootObject in $RootObjects)
     {
-        $ConnectedDevices = @()
-        $ConnectedDevices += Find-StatConnectedDevices -device $RootObject
-        if ($RootObject.Vendor -match "(Juniper|Unknown)")
+        $ConnectedDevices = Find-StatConnectedAllDevices
+        foreach ($ConnectedDevice in $ConnectedDevices)
+        {
+            
+        }
+    }
+
+    return $AllDevices
+}
+
+Function Find-StatConnectedAllDevices
+{
+    param
+    (
+        $RootObject
+    )
+
+    $ConnectedDevices = @()
+    $ConnectedDevices += Find-StatConnectedDevices -device $RootObject
+        
+    if ($RootObject.Vendor -match "(Juniper|Unknown)")
         {
             try
             {
 
                 $JuniperConnectedDevices = Find-StatConnectedJuniperDevices -device $RootObject
-
-                return $JuniperConnectedDevices
 
                 $ConnectedDevices += $JuniperConnectedDevices
             }   
@@ -1269,14 +1286,6 @@ Function Invoke-StatMapGenerationFromGroup
 
             }
         }
-
-        foreach ($ConnectedDevice in $ConnectedDevices)
-        {
-            
-        }
-    }
-
-    return $AllDevices
 }
 
 Function Find-StatConnectedJuniperDevices
@@ -1284,68 +1293,169 @@ Function Find-StatConnectedJuniperDevices
     param
     (
         $Device,
+        [switch]
+        $IncludeInterfaces,
         $DeviceList
     )
 
-    $IPAddresses = Get-StatIpAddress -allProperties | where {$_.deviceid -eq $Device.deviceid}
-    $ManagementInterface = $null
-    $IPAddressIndex = 0
-    do
+    if (-not $DeviceList)
     {
-        $IPAddressTemp = $IPAddresses[$IPAddressIndex]
+        $DeviceList = Get-statDevice -allproperties
+        
+    }
 
-        Write-Verbose "Trying IP $($IPAddressTemp.ipaddress)"
+    $ReturnDeviceList = @()
 
-        $IPAddressIndex++
+    $IPAddresses = @([pscustomobject]@{
+         deviceid = $Device.deviceid
+         ipaddress = $Device.ipaddress   
+    })
 
-        try 
+    $IPAddresses += Get-StatIpAddress -allProperties | where {$_.deviceid -eq $Device.deviceid}
+
+    $ParentResult = (Get-JuniperLLDPNeighbors -hostnames $IPAddresses.ipaddress -credentials $StatStoredJuniperCredentials)
+
+    $ConnectedDevices = $ParentResult.'lldp-neighbors-information'.'lldp-neighbor-information'
+
+    $ConnectedParentStatDevice = $DeviceList | where {$_.deviceid -eq $Device.deviceid}
+    
+    foreach ($ConnectedDevice in $ConnectedDevices)
+    {
+        $RSN = ($ConnectedDevice.'lldp-remote-system-name' -split "\.")[0]
+        
+        Write-Verbose "Getting details for connected device $RSN"
+
+        $ConnectedStatDevice = $DeviceList | where {$_.name -match $RSN} | select -first 1
+
+
+        if ($ConnectedStatDevice -ne $null)
         {
-            if (Test-HostStatus $IPAddressTemp.ipaddress -timeout 2000)
+            Write-Debug "$($ConnectedStatDevice.name)"
+            $ConnectedDeviceList = $ConnectedStatDevice.ConnectedDevices
+
+            $ConnectedDeviceObject = [pscustomobject]@{
+                deviceid = $Device.deviceid
+                LocalPorts = @()
+            }
+
+            if ($ConnectedDeviceList -ne $null)
             {
-                Write-Verbose "Host is alive"
-                foreach ($StoredCredential in $StatStoredJuniperCredentials)
-                {
-                    try 
-                    {
-                        $ConnectedStatDevices = @()
-                        $Result = (Get-JuniperLLDPNeighbors $IPAddressTemp.ipaddress `
-                                                                          $StoredCredential)
-
-
-                        $ConnectedDevices = $Result.'lldp-neighbors-information'.'lldp-neighbor-information'
-                        
-
-                        foreach ($ConnectedDevice in $ConnectedDevices)
-                        {
-                            $ConnectedDevice = ($ConnectedDeviceName -split "\.")[0]
-                            $StatDevice = $DeviceList | where {$_.name -match $ConnectedDevice}
-                            $Ports = Get-statdeviceports -deviceid $StatDevice.deviceid -allproperties
-
-                            $ConnectedStatDevices += 
-                        }
-
-                        return $ConnectedStatDevices
-                    }
-                    catch
-                    {
-
-                    }
-                }
+                $ConnectedDeviceList += $ConnectedDeviceObject
             }
             else 
             {
-                Write-Verbose "Host is offline"
-                
+                $ConnectedDeviceList = @($ConnectedDeviceObject)
+            }
+
+            $ConnectedStatDevice | add-member -Type NoteProperty -Name ConnectedDevices -Value $ConnectedDeviceList -Force
+
+            $DeviceList[$DeviceList.deviceid.indexof($ConnectedStatDevice.deviceid)] = $ConnectedStatDevice
+
+            $ConnectedDeviceList = $ConnectedParentStatDevice.ConnectedDevices
+
+            $ConnectedDeviceObject = [pscustomobject]@{
+                deviceid = $ConnectedStatDevice.deviceid
+                LocalPorts = @()
+            }
+
+            if ($ConnectedDeviceList -ne $null)
+            {
+                $ConnectedDeviceList += $ConnectedDeviceObject
+            }
+            else 
+            {
+                $ConnectedDeviceList = @($ConnectedDeviceObject)
+            }
+
+            $ConnectedParentStatDevice | add-member -Type NoteProperty -Name ConnectedDevices -Value $ConnectedDeviceList -Force
+        }
+        else {
+            Write-Verbose "Device $RSN doesn't exist"
+        }
+    }
+
+    $DeviceList[$DeviceList.deviceid.indexof($ConnectedParentStatDevice.deviceid)] = $ConnectedParentStatDevice
+
+    if ($IncludeInterfaces)
+    {
+        $ConnectedStatDevices = $DeviceList | where {$_.connecteddevices} | where {$_.ConnectedDevices.LocalPorts.count -contains 0}
+
+        foreach ($ConnectedStatDevice in $ConnectedStatDevices)
+        {
+            set-variable -scope 1 -name StatDeviceCache -Value $DeviceList
+            $DeviceList = Find-StatConnectedJuniperDevicePorts $ConnectedStatDevice $DeviceList
+        }
+
+        return $DeviceList
+    }
+    else
+    {
+        return $DeviceList
+    }
+}
+
+Function Find-StatConnectedJuniperDevicePorts
+{
+    param
+    (
+        $BaseDevice,
+        $DeviceList
+    )
+
+    $IPAddresses = @([pscustomobject]@{
+         deviceid = $BaseDevice.deviceid
+         ipaddress = $BaseDevice.ipaddress   
+    })
+
+    $IPAddresses += Get-StatIpAddress -allProperties | where {$_.deviceid -eq $BaseDevice.deviceid}
+    $ParentPorts = Get-statdeviceports -deviceid $BaseDevice.deviceid -allproperties
+
+    $LLDPInfo = (Get-JuniperLLDPNeighbors -hostnames $IPAddresses.ipaddress -credentials $StatStoredJuniperCredentials).'lldp-neighbors-information'.'lldp-neighbor-information'
+
+    foreach ($ConnectedDevice in $BaseDevice.ConnectedDevices)
+    {
+        $StatDevice = $DeviceList | where {$_.deviceid -eq $ConnectedDevice.deviceid}
+
+        $DeviceLLDPInfo = $LLDPInfo | where {$StatDevice.name -match ($_.'lldp-remote-system-name' -split "\.")[0]}
+
+        $Ports = @()
+
+        if ($DeviceLLDPInfo.count -gt 1)
+        {   
+            $AggParentPorts = $DeviceLLDPInfo.'lldp-local-parent-interface-name' | select -unique
+            foreach ($AggParentPort in $AggParentPorts)
+            {
+                $AggSpecLLDPInfo = $DeviceLLDPInfo | where {$_.'lldp-local-parent-interface-name' -eq $AggParentPort}
+                $BasePort = $ParentPorts | where {$_.name -match $AggParentPort} | select -first 1
+                $ChildPorts = $ParentPorts | where {($_.name -in $AggSpecLLDPInfo.'lldp-local-port-id')} 
+
+                $Port = [pscustomobject]@{
+                    Type = "Aggregate interface"
+                    BasePort = $BasePort
+                    ChildPorts = $ChildPorts
+                }
+
+                $Ports += $Port
             }
         }
-        catch
+        else
         {
+            $BasePort = $ParentPorts | where {($_.name -in $AggSpecLLDPInfo.'lldp-local-port-id')} | select -first 1
+            $Port = [pscustomobject]@{
+                Type = "Aggregate interface"
+                BasePort =  $BasePort
+                ChildPorts = $null
+            }   
 
+            $Ports += $Port
         }
 
-        $SearchingForValidManagementInterface = ($ManagementInterface -eq $null) -and ($IPAddressIndex -lt $IPAddresses.Count)
+        $ConnectedDevice.LocalPorts = $Ports
     }
-    while ($SearchingForValidManagementInterface)
+
+    $DeviceList[$DeviceList.deviceid.indexof($BaseDevice.deviceid)] = $BaseDevice
+
+    return $DeviceList
 }
 
 Function Find-StatConnectedPaloDevices
