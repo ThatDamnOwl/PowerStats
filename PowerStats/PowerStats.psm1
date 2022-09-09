@@ -1315,7 +1315,7 @@ Function Find-StatConnectedJuniperDevices
 
     $ParentResult = (Get-JuniperLLDPNeighbors -hostnames $IPAddresses.ipaddress -credentials $StatStoredJuniperCredentials)
 
-    $ConnectedDevices = $ParentResult.'lldp-neighbors-information'.'lldp-neighbor-information'
+    $ConnectedDevices = $ParentResult.'lldp-neighbors-information'.'lldp-neighbor-information' | select -unique 'lldp-remote-system-name'
 
     $ConnectedParentStatDevice = $DeviceList | where {$_.deviceid -eq $Device.deviceid}
     
@@ -1338,7 +1338,7 @@ Function Find-StatConnectedJuniperDevices
                 LocalPorts = @()
             }
 
-            if ($ConnectedDeviceList -ne $null)
+            if (($ConnectedDeviceList -ne $null) -and ($ConnectedDeviceList.deviceid -notcontains $ConnectedDeviceObject.deviceid))
             {
                 $ConnectedDeviceList += $ConnectedDeviceObject
             }
@@ -1378,12 +1378,14 @@ Function Find-StatConnectedJuniperDevices
 
     if ($IncludeInterfaces)
     {
-        $ConnectedStatDevices = $DeviceList | where {$_.connecteddevices} | where {$_.ConnectedDevices.LocalPorts.count -contains 0}
+        $ConnectedStatDevices = $DeviceList | where {$_.connecteddevices -ne $null}
 
         foreach ($ConnectedStatDevice in $ConnectedStatDevices)
         {
-            set-variable -scope 1 -name StatDeviceCache -Value $DeviceList
+            #set-variable -scope 1 -name StatDeviceCache -Value $DeviceList
             $DeviceList = Find-StatConnectedJuniperDevicePorts $ConnectedStatDevice $DeviceList
+
+            #return $DeviceList
         }
 
         return $DeviceList
@@ -1411,12 +1413,14 @@ Function Find-StatConnectedJuniperDevicePorts
     $ParentPorts = Get-statdeviceports -deviceid $BaseDevice.deviceid -allproperties
 
     $LLDPInfo = (Get-JuniperLLDPNeighbors -hostnames $IPAddresses.ipaddress -credentials $StatStoredJuniperCredentials).'lldp-neighbors-information'.'lldp-neighbor-information'
-
+    #return $LLDPInfo
+    Write-Debug "Number of connecteddevices - $($BaseDevice.ConnectedDevices)"
     foreach ($ConnectedDevice in $BaseDevice.ConnectedDevices)
     {
         $StatDevice = $DeviceList | where {$_.deviceid -eq $ConnectedDevice.deviceid}
+        Write-Debug "snmpEngineID - $($StatDevice.snmpEngineID)"
 
-        $DeviceLLDPInfo = $LLDPInfo | where {$StatDevice.name -match ($_.'lldp-remote-system-name' -split "\.")[0]}
+        $DeviceLLDPInfo = $LLDPInfo | where {($StatDevice.snmpEngineID -match $_.'lldp-remote-chassis-id')} | %{Write-Debug "remote-id    - $($_.'lldp-remote-chassis-id')"; $_}
 
         $Ports = @()
 
@@ -1425,8 +1429,10 @@ Function Find-StatConnectedJuniperDevicePorts
             $AggParentPorts = $DeviceLLDPInfo.'lldp-local-parent-interface-name' | select -unique
             foreach ($AggParentPort in $AggParentPorts)
             {
+                Write-Debug "Aggregate interface detected for $($StatDevice.name) - $($AggParentPort)"
                 $AggSpecLLDPInfo = $DeviceLLDPInfo | where {$_.'lldp-local-parent-interface-name' -eq $AggParentPort}
                 $BasePort = $ParentPorts | where {$_.name -match $AggParentPort} | select -first 1
+                Write-Debug "$($BasePort.name)"
                 $ChildPorts = $ParentPorts | where {($_.name -in $AggSpecLLDPInfo.'lldp-local-port-id')} 
 
                 $Port = [pscustomobject]@{
@@ -1440,9 +1446,11 @@ Function Find-StatConnectedJuniperDevicePorts
         }
         else
         {
+            $AggSpecLLDPInfo = $DeviceLLDPInfo | where {$_.'lldp-local-parent-interface-name' -eq $AggParentPort}
+            Write-Debug "Single interface detected for $($StatDevice.name)"
             $BasePort = $ParentPorts | where {($_.name -in $AggSpecLLDPInfo.'lldp-local-port-id')} | select -first 1
             $Port = [pscustomobject]@{
-                Type = "Aggregate interface"
+                Type = "Single interface"
                 BasePort =  $BasePort
                 ChildPorts = $null
             }   
