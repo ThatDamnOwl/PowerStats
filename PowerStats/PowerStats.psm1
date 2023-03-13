@@ -1,6 +1,6 @@
 ## Required Module imports
 
-Import-module CommonFunctions -force
+Import-module AdhocAves.CommonFunctions -force
 Import-module PowerJuniper -force
 # Module Variables plus getters/setters
 
