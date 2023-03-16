@@ -129,16 +129,16 @@ Function Get-StatStoredJuniperCredentials
 Function Invoke-StatVariableSave 
 {
     $AllVariables = Get-Variable -scope 1 | where {$_.name -match "Stat"}
-    $SavePath = "$ModuleFolder\$($ENV:Username)-Variables.json"
+    $SaveFile = "PowerStats-$($ENV:Username)-Variables.json"
 
-    Write-Debug "Starting save job to $SavePath"
+    Write-Debug "Starting save job to $SaveFile"
 
-    Invoke-VariableJSONSave -ModuleName "PowerStats" -SavePath $SavePath -Variables $AllVariables -verbosepreference:$VerbosePreference
+    Invoke-VariableJSONSave -ModuleName "PowerStats" -SaveFile $SaveFile -Variables $AllVariables -verbosepreference:$VerbosePreference
 }
 
 Function Invoke-StatVariableLoad
 {
-    $VariablePath = "$ModuleFolder\$($ENV:Username)-Variables.json"
+    $VariablePath = "PowerStats-$($ENV:Username)-Variables.json"
     if (test-path $VariablePath)
     {
         Write-Verbose "Importing variables from $VariablePath"
@@ -151,7 +151,6 @@ Function Invoke-StatVariableLoad
         }
 
     }
-
 }
 
 #Basic Functions
